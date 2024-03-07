@@ -30,8 +30,8 @@ to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("auth called")
 		config := &oauth2.Config{
-			ClientID:     "1096710297832-tmmj2s9tfj5v27hbsmbq7b7i7tecisht.apps.googleusercontent.com",
-			ClientSecret: "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",
+			ClientID:     "",
+			ClientSecret: "",
 			RedirectURL: "http://localhost:8080",
 			Endpoint:     google.Endpoint,
 			Scopes:       []string{calendar.CalendarReadonlyScope},
