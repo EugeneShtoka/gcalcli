@@ -5,11 +5,11 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
 
+	"github.com/rs/zerolog"
 	"github.com/skratchdot/open-golang/open"
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
@@ -28,11 +28,11 @@ Cobra is a CLI library for Go that empowers applications.
 This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("auth called")
+		log.Println("auth called")
 		config := &oauth2.Config{
-			ClientID:     "",
-			ClientSecret: "",
-			RedirectURL: "http://localhost:8080",
+			ClientID:     "1096710297832-tmmj2s9tfj5v27hbsmbq7b7i7tecisht.apps.googleusercontent.com",
+			ClientSecret: "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",
+			RedirectURL: "http://localhost:8080/auth",
 			Endpoint:     google.Endpoint,
 			Scopes:       []string{calendar.CalendarReadonlyScope},
 		}
@@ -47,19 +47,19 @@ var authConfig oauth2.Config
 func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
     state := r.FormValue("state")
 	authCode := r.FormValue("code")
-	fmt.Printf("Code: %s, State: %s, oauthStateString: %s\n", authCode, state, oauthStateString)
+	log.Printf("Code: %s, State: %s, oauthStateString: %s\n", authCode, state, oauthStateString)
     if state != oauthStateString {
 		log.Fatal("Invalid oauth state.")
     }
 
-	fmt.Printf("authCode: %s\n", authCode)
+	log.Printf("authCode: %s\n", authCode)
 	tok, err := authConfig.Exchange(context.TODO(), authCode)
 	if err != nil {
 			log.Fatalf("Unable to retrieve token from web: %v", err)
 	}
 	codeChannel <- authCode
 
-	fmt.Printf("authCode: %v\n", tok)
+	log.Printf("authCode: %v\n", tok)
 
 }
 
@@ -70,8 +70,7 @@ func getTokenFromWeb(config *oauth2.Config) error {
 	// fmt.Printf("Go to the following link in your browser then type the "+
 	//         "authorization code: \n%v\n", authURL)
 
-	http.HandleFunc("/", handleGoogleCallback)
-	http.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {})
+	http.HandleFunc("/auth", handleGoogleCallback)
 
 	listener, err := net.Listen("tcp", ":8080")
 	if err != nil {
@@ -83,9 +82,9 @@ func getTokenFromWeb(config *oauth2.Config) error {
 	}
 
 	go server.Serve(listener)
-	fmt.Printf("Served & Listening on %s\n", listener.Addr())
+	log.Printf("Served & Listening on %s\n", listener.Addr())
 	result := <-codeChannel
-	fmt.Printf("Result: %s\n", result)
+	log.Printf("Result: %s\n", result)
 	
 	close(codeChannel)
 	listener.Close()
@@ -94,7 +93,17 @@ func getTokenFromWeb(config *oauth2.Config) error {
 	return nil
 }
 
+func Authorize(gaToken *GAToken, logger *zerolog.Logger) error {
+	server := newGAServer(gaToken, newLogger())
+	code, err := server.Authorize()
+	if err != nil {
+		return err
+	}
 
+	gaToken.Code = code
+	gaToken.save()
+	return nil
+}
 
 func init() {
 	rootCmd.AddCommand(authCmd)
@@ -109,3 +118,5 @@ func init() {
 	// is called directly, e.g.:
 	// authCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }
+
+
