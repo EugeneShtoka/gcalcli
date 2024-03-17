@@ -9,7 +9,21 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/skratchdot/open-golang/open"
 	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
+	"google.golang.org/api/calendar/v3"
 )
+
+var (
+	host = "127.0.0.1"
+	authEndpoint = "/codeResponse"
+)
+
+type GAToken struct {
+	BindAddress		string
+	AuthEndpoint	string
+	Code 			string
+	Config 			*oauth2.Config
+}
 
 type GAServer struct {
 	State       string
@@ -25,12 +39,28 @@ type GAError struct {
 	Description string
 }
 
-// newGAServer makes the webserver for collecting auth
-func newGAServer(gaToken *GAToken, logger *zerolog.Logger) *GAServer {
+func newGAToken(clientID string, clientSecret string, port string) *GAToken {
+	bindAddress := fmt.Sprintf("%s:%s", host, port)
+	config := &oauth2.Config{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		RedirectURL: fmt.Sprintf("http://%s%s", bindAddress, authEndpoint),
+		Endpoint:     google.Endpoint,
+		Scopes:       []string{calendar.CalendarReadonlyScope},
+	}
+	return &GAToken{
+		BindAddress: bindAddress,
+		AuthEndpoint: authEndpoint,
+		Config:      config,
+	}
+}
+
+// NewGAServer makes the webserver for collecting auth
+func NewGAServer(clientID string, clientSecret string, port string, logger *zerolog.Logger) *GAServer {
 	return &GAServer{
 		State:       "random-string",
 		Logger:		 logger,
-		GAToken:	 gaToken,
+		GAToken:	 newGAToken(clientID, clientSecret, port),
 		Code:		 make(chan string, 1),
 	}
 }
@@ -49,8 +79,9 @@ func (s *GAServer) reply(w http.ResponseWriter, res *GAError) {
 	w.WriteHeader(status)
 	w.Header().Set("Content-Type", "text/html")
 	var t = template.Must(template.New("authResponse").Parse(responseTemplate))
-	if err := t.Execute(w, res); err != nil {
-		s.Logger.Debug().Msg("Could not execute template for web response.")
+	var err = t.Execute(w, res);
+	if  err != nil {
+		s.Logger.Debug().Msg(fmt.Sprintf("Could not execute template for web response: %s", err))
 	}
 }
 
@@ -67,7 +98,7 @@ func (s *GAServer) HandleAuth(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// get code, error if empty
-	code := req.Form.Get("code")
+	var code = req.Form.Get("code")
 	if code == "" {
 		s.reply(w, &GAError{
 			Name:        "Auth Error",
@@ -77,7 +108,7 @@ func (s *GAServer) HandleAuth(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// check state
-	state := req.Form.Get("state")
+	var state = req.Form.Get("state")
 	if state != s.State {
 		s.reply(w, &GAError{
 			Name:        "Auth state doesn't match",
@@ -94,7 +125,7 @@ func (s *GAServer) HandleAuth(w http.ResponseWriter, req *http.Request) {
 // Init gets the internal web server ready to receive config details
 func (gaServer *GAServer) Init() error {
 	gaServer.Logger.Debug().Str("BindAddress", gaServer.GAToken.BindAddress).Msg("Starting auth server")
-	mux := http.NewServeMux()
+	var mux = http.NewServeMux()
 	gaServer.Server = &http.Server{
 		Addr:    gaServer.GAToken.BindAddress,
 		Handler: mux,
@@ -106,15 +137,15 @@ func (gaServer *GAServer) Init() error {
 	var err error
 	gaServer.Listener, err = net.Listen("tcp", gaServer.GAToken.BindAddress)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to start listener: %w", err)
 	}
 	return nil
 }
 
 // Serve the auth server, doesn't return
-func (s *GAServer) Serve() {
-	err := s.Server.Serve(s.Listener)
-	fmt.Errorf("Closed auth server with error: %w", err)
+func (s *GAServer) Serve() error {
+	var err = s.Server.Serve(s.Listener)
+	return fmt.Errorf("closed auth server with error: %w", err)
 }
 
 // Stop the auth server by closing its socket
@@ -124,32 +155,26 @@ func (s *GAServer) Stop() {
 	s.Server.Close()
 }
 
-func (gaServer *GAServer) Authorize() (string, error) {
-	err := gaServer.Init()
+func (gaServer *GAServer) Authorize() (*GAToken, error) {
+	var err = gaServer.Init()
 	if err != nil {
-		return "", fmt.Errorf("Failed to start auth webserver: %w", err)
+		return nil, fmt.Errorf("failed to start auth webserver: %w", err)
 	}
 
 	go gaServer.Serve()
 	defer gaServer.Stop()
 
 	// Open the URL for the user to visit
-	authUrl := gaServer.GAToken.Config.AuthCodeURL(gaServer.State, oauth2.AccessTypeOffline)
+	var authUrl = gaServer.GAToken.Config.AuthCodeURL(gaServer.State, oauth2.AccessTypeOffline)
 	open.Start(authUrl)
 
-	code := <- gaServer.Code
+	fmt.Printf("Waiting for gaServer.Code to be set\n")
+	gaServer.GAToken.Code = <- gaServer.Code
 
-	if	code == "" {
-		return "", fmt.Errorf("Failed to start auth webserver: %w", err)
+	if	gaServer.GAToken.Code == "" {
+		return nil, fmt.Errorf("failed to start auth webserver: %w", err)
 	} 
 
-	return code, nil
+	return gaServer.GAToken, nil
 }
 
-func Authorize(gaToken *GAToken, logger *zerolog.Logger) (string, error) {
-	server := newGAServer(gaToken, logger)
-	code, err := server.Authorize()
-	gaToken.Code = code
-
-	return auth.Code, nil
-}

@@ -1,20 +1,17 @@
 /*
-Copyright © 2024 NAME HERE <EMAIL ADDRESS>
+Copyright © 2024 Eugene Shtoka eshtoka@gmail.com
 */
 package cmd
 
 import (
-	"context"
-	"log"
-	"net"
-	"net/http"
+	"fmt"
 
 	"github.com/rs/zerolog"
-	"github.com/skratchdot/open-golang/open"
 	"github.com/spf13/cobra"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
-	"google.golang.org/api/calendar/v3"
+
+	"github.com/EugeneShtoka/gcalcli/lib/gauth"
+	"github.com/EugeneShtoka/gcalcli/lib/levelwriter"
+	"github.com/EugeneShtoka/gcalcli/lib/tokenrepo"
 )
 
 // authCmd represents the auth command
@@ -28,80 +25,91 @@ Cobra is a CLI library for Go that empowers applications.
 This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		log.Println("auth called")
-		config := &oauth2.Config{
-			ClientID:     "1096710297832-tmmj2s9tfj5v27hbsmbq7b7i7tecisht.apps.googleusercontent.com",
-			ClientSecret: "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",
-			RedirectURL: "http://localhost:8080/auth",
-			Endpoint:     google.Endpoint,
-			Scopes:       []string{calendar.CalendarReadonlyScope},
-		}
-		getTokenFromWeb(config)
+		getTokenFromWeb()
 	},
 }
 
-var codeChannel = make(chan string, 1)
-var oauthStateString = "pseudo-random"
-var authConfig oauth2.Config
+// TODO: move port to optional params, and set default to 8080
+// TODO: set command modes? to set, list and delete tokens
+// TODO: add optional param for token name
+// TODO: add optional param to set clientId and clientSecret from file
+// TODO: add a help command with a list of available commands to usage
+// TODO: add test cases
 
-func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
-    state := r.FormValue("state")
-	authCode := r.FormValue("code")
-	log.Printf("Code: %s, State: %s, oauthStateString: %s\n", authCode, state, oauthStateString)
-    if state != oauthStateString {
-		log.Fatal("Invalid oauth state.")
-    }
+func getStringInput(paramName string, minLength int, maxLength int) string {
+	var param string
+	for {
+		fmt.Printf("Enter %s: ", paramName)
+		_, err := fmt.Scan(&param)
 
-	log.Printf("authCode: %s\n", authCode)
-	tok, err := authConfig.Exchange(context.TODO(), authCode)
-	if err != nil {
-			log.Fatalf("Unable to retrieve token from web: %v", err)
+		if err == nil {
+			if (len(param) < minLength) {
+				if (len(param) == 0) {
+					fmt.Printf("%s can't be empty\n", paramName)
+				} else {
+					fmt.Printf("%s must be at least %d characters long\n", paramName, minLength)
+				}
+				continue
+			} else if (maxLength > 0 && len(param) > maxLength) {
+				fmt.Printf("%s must be at most %d characters long\n", paramName, maxLength)
+				continue
+			}
+			break
+		} else {
+			fmt.Println(err)
+		}
 	}
-	codeChannel <- authCode
-
-	log.Printf("authCode: %v\n", tok)
-
+	return param
 }
 
-func getTokenFromWeb(config *oauth2.Config) error { 
-	authConfig = *config
-	authURL := config.AuthCodeURL(oauthStateString, oauth2.AccessTypeOffline)
-	open.Start(authURL)
-	// fmt.Printf("Go to the following link in your browser then type the "+
-	//         "authorization code: \n%v\n", authURL)
+func getIntInput(paramName string, min *int, max *int) int {
+	var param int
+	for {
+		fmt.Printf("Enter %s: ", paramName)
+		_, err := fmt.Scan(&param)
 
-	http.HandleFunc("/auth", handleGoogleCallback)
+		if err == nil {
+			if (min != nil && param < *min) {
+				fmt.Printf("%s must be greater than %d", paramName, *min)
+				continue
+			} else if (max != nil && param > *max) {
+				fmt.Printf("%s must be greater than %d", paramName, *max)
+				continue
+			}
+			break
+		} else {
+			fmt.Println(err)
+		}
+	}
+	return param
+}
 
-	listener, err := net.Listen("tcp", ":8080")
+func getTokenFromWeb() error { 
+	var name = getStringInput("calendar name", 1, -1)
+	var clientID = getStringInput("client id", 60, 100)
+	var clientSecret = getStringInput("client secret", 30, 40)
+
+	var minPort = 1024
+	var maxPort = 65535
+	var port = getIntInput("port", &minPort, &maxPort)
+
+	var logger = levelwriter.NewLogger(zerolog.DebugLevel)
+	return Authorize(name, clientID, clientSecret, fmt.Sprintf("%d", port), &logger)
+}
+
+func Authorize(name string, clientID string, clientSecret string, port string, logger *zerolog.Logger) error {
+	server := gauth.NewGAServer(clientID, clientSecret, port, logger)
+	token, err := server.Authorize()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to authorize: %w", err)
 	}
-
-	server := http.Server{
-		Addr: ":8080",
-	}
-
-	go server.Serve(listener)
-	log.Printf("Served & Listening on %s\n", listener.Addr())
-	result := <-codeChannel
-	log.Printf("Result: %s\n", result)
 	
-	close(codeChannel)
-	listener.Close()
-	server.Close()
-
-	return nil
-}
-
-func Authorize(gaToken *GAToken, logger *zerolog.Logger) error {
-	server := newGAServer(gaToken, newLogger())
-	code, err := server.Authorize()
+	fmt.Printf("Successfully authorized. Saving token named: %s to keyring.\n", name)
+	err = tokenrepo.SaveToken(token, name)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to save token %s to keyring: %w", name, err)
 	}
-
-	gaToken.Code = code
-	gaToken.save()
+	fmt.Printf("Token saved and ready for use\n")
 	return nil
 }
 

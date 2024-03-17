@@ -35,6 +35,6 @@ func (l logOut) WriteLevel(level zerolog.Level, p []byte) (n int, err error) {
     return 0, nil;
 }
 
-func newLogger(minLevel zerolog.Level) zerolog.Logger {
+func NewLogger(minLevel zerolog.Level) zerolog.Logger {
     return zerolog.New(logOut{minLevel}).With().Timestamp().Logger()
 }
