@@ -1,5 +1,5 @@
 /*
-Copyright © 2024 Eugene Shtoka eshtoka@gmail.com
+Copyright © 2024 Eugene Shtoka <eshtoka@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -29,13 +29,13 @@ var cfgFile string
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "gcalcli",
-	Short: "A brief description of your application",
-	Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
+	Short: "List events from multiple Google Calendars, offering customizable filtering.",
+	Long: `List events from multiple Google Calendars, offering customizable filtering. 
+For example:
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+gcalcli --calendar "Work" --start "2023-12-25" --end "2024-01-01"
+
+gcalcli --mode "json" --start "2023-12-25" --end "2024-01-01".`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	// Run: func(cmd *cobra.Command, args []string) { },
@@ -57,7 +57,17 @@ func init() {
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.gcalcli.yaml)")
+	// Find home directory.
+	home, err := os.UserHomeDir()
+	var message, cfgDefault string
+	if (err != nil) {
+		message = "Failed to retrieve user home dir. You will have to set path to config file manually"
+	} else {
+		message = "Pass for config file"
+		cfgDefault = fmt.Sprintf("%s/.config/gcalcli.yaml", home)
+	}
+
+	cfgFile = *rootCmd.PersistentFlags().StringP("config", "c", cfgDefault, message)
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
@@ -69,15 +79,6 @@ func initConfig() {
 	if cfgFile != "" {
 		// Use config file from the flag.
 		viper.SetConfigFile(cfgFile)
-	} else {
-		// Find home directory.
-		home, err := os.UserHomeDir()
-		cobra.CheckErr(err)
-
-		// Search config in home directory with name ".gcalcli" (without extension).
-		viper.AddConfigPath(home)
-		viper.SetConfigType("yaml")
-		viper.SetConfigName(".gcalcli")
 	}
 
 	viper.AutomaticEnv() // read in environment variables that match
